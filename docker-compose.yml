@@ -1,0 +1,10 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16 # Pre-installed with pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=lexdistill
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
