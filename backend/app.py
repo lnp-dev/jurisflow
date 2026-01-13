@@ -15,6 +15,8 @@ except ImportError as e:
     print(f"Error importing juris_core module: {e}")
     raise
 
+masker = juris_core.PiiMasker()
+
 app = FastAPI(title='JurisFlow Backend API')
 
 # --- CORS CONFIGURATION ---
@@ -46,7 +48,7 @@ def extract_text_from_pdf_bytes(pdf_bytes) -> str:
     return raw_text
 
 def redact_pii_from_text(text: str) -> str:
-    redacted_text = juris_core.mask_pii(text)
+    redacted_text = masker.mask_sensitive_pii(text)
     return redacted_text
 
 
