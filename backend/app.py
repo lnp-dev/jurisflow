@@ -39,9 +39,9 @@ def extract_text_from_pdf_bytes(pdf_bytes) -> str:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         raw_text_list = []
         for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text is not None:
-                    raw_text_list.append(page_text)
+            page_text = page.extract_text()
+            if page_text is not None:
+                raw_text_list.append(page_text)
         raw_text = "\n".join(raw_text_list)
     return raw_text
 
