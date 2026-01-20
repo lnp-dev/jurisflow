@@ -23,7 +23,7 @@ except ImportError as e:
     raise
 
 
-app = FastAPI(title='JurisFlow Backend API')
+app = FastAPI(title='JurisFlow API')
 # --- CORS CONFIGURATION ---
 # Configure Cross-Origin Resource Sharing (CORS) to allow the React frontend
 # to communicate with this FastAPI backend.
@@ -46,25 +46,40 @@ def extract_text_from_pdf_bytes(pdf_bytes) -> str:
     return raw_text
 
 
+class createCase(BaseModel):
+    name: str = Field(..., max_length=100)
+
+
 # --- ENDPOINTS ---
 
 @app.get('/')
 def home():
-    return {'status': 'System is healthy.', 'model_version': '1.0'}
+    return {'name': 'JurisFlow API', 'status': 'healthy', 'model_version': '1.0'}
+
+@app.post('/cases')
+def create_case(case: createCase):
+    # Logic to create a new case
+    pass
+
+@app.get('/cases/{case_id}')
+def get_case(case_id: int):
+    # Logic to get a case by ID
+    pass
+
+@app.post('/cases/{case_id}/upload')
+async def upload_document(case_id: int):
+    # Logic to upload a document to a case
+    pass
+
+@app.get('/cases/{case_id}/documents/{document_id}')
+def get_document(case_id: int, document_id: int):
+    # Logic to get a document by ID within a case
+    pass
+
+
 '''
-def redact_pii_from_text(text: str) -> str:
-    # Use the juris_core PiiMasker to redact PII with obvious structure from the text
-    redacted_text = masker.mask_sensitive_pii(text)
-
-    #Use GLiNER to redact context-dependent PII
-
-    return redacted_text
-'''
-
-
-
-@app.post("/process-pdf/")
-async def process_document(file: UploadFile = File(...)):
+@app.post("/")
+async def upload_pdf(file: UploadFile = File(...)):
     """Process uploaded PDF file and return extracted text with PII redacted."""
 
     if file.content_type != 'application/pdf':
@@ -78,6 +93,7 @@ async def process_document(file: UploadFile = File(...)):
     
     return {"redacted_text": redacted_text}
 
+'''
 
 
 
