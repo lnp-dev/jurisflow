@@ -4,8 +4,15 @@ import os
 import io
 import asyncio
 import pdfplumber
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from gliner import GLiNER
+from sqlalchemy.orm import Session
+from database.models import EntityMap #SQL Table
+from core.processor import LegalProcessor
+
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'core')))
 
@@ -15,10 +22,8 @@ except ImportError as e:
     print(f"Error importing juris_core module: {e}")
     raise
 
-masker = juris_core.PiiMasker()
 
 app = FastAPI(title='JurisFlow Backend API')
-
 # --- CORS CONFIGURATION ---
 # Configure Cross-Origin Resource Sharing (CORS) to allow the React frontend
 # to communicate with this FastAPI backend.
@@ -30,13 +35,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ENDPOINTS ---
-
-@app.get('/')
-def home():
-    return {'status': 'System is healthy.', 'model_version': '1.0'}
-
-
 def extract_text_from_pdf_bytes(pdf_bytes) -> str:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         raw_text_list = []
@@ -47,9 +45,22 @@ def extract_text_from_pdf_bytes(pdf_bytes) -> str:
         raw_text = "\n".join(raw_text_list)
     return raw_text
 
+
+# --- ENDPOINTS ---
+
+@app.get('/')
+def home():
+    return {'status': 'System is healthy.', 'model_version': '1.0'}
+'''
 def redact_pii_from_text(text: str) -> str:
+    # Use the juris_core PiiMasker to redact PII with obvious structure from the text
     redacted_text = masker.mask_sensitive_pii(text)
+
+    #Use GLiNER to redact context-dependent PII
+
     return redacted_text
+'''
+
 
 
 @app.post("/process-pdf/")
