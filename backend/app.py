@@ -4,6 +4,7 @@ import os
 import io
 import asyncio
 import pdfplumber
+from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -46,9 +47,35 @@ def extract_text_from_pdf_bytes(pdf_bytes) -> str:
     return raw_text
 
 
-class createCase(BaseModel):
+class CaseCreate(BaseModel):
     name: str = Field(..., max_length=100)
 
+    class Config:
+        from_attributes = True
+        str_strip_whitespace = True
+        extra = 'forbid'
+
+class CasePublic(BaseModel):
+    id: int
+    case_id: int
+    name: str
+
+
+    class Config:
+        from_attributes = True
+        str_strip_whitespace = True
+        extra = 'forbid'
+
+class DocumentPublic(BaseModel):
+    id: int
+    case_id: int
+    filename: str
+    upload_date: datetime
+
+    class Config:
+        from_attributes = True
+        str_strip_whitespace = True
+        extra = 'forbid'
 
 # --- ENDPOINTS ---
 
