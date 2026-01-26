@@ -1,4 +1,11 @@
 from gliner import GLiNER
+from database.models import EntityMap
+try:
+    import juris_core
+except ImportError as e:
+    print(f"Error importing juris_core module: {e}")
+    raise
+
 class LegalProcessor:
 
     cases = []
@@ -22,7 +29,7 @@ class LegalProcessor:
 
         #GLiNER Redaction
         labels = ['person', 'organization']
-        entities = global_gliner.predict_entities(masked_text, labels=labels, threshold=0.5)
+        entities = LegalProcessor.global_gliner.predict_entities(masked_text, labels=labels, threshold=0.5)
 
         entities = sorted(entities, key=lambda x: x['start'], reverse=True)
         final_text = masked_text

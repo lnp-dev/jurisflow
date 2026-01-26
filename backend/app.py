@@ -11,17 +11,13 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from gliner import GLiNER
 from sqlalchemy.orm import Session
-from database.models import EntityMap #SQL Table
+ #SQL Table
 from core.processor import LegalProcessor
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'core')))
 
-try:
-    import juris_core
-except ImportError as e:
-    print(f"Error importing juris_core module: {e}")
-    raise
+
 
 
 app = FastAPI(title='JurisFlow API')
@@ -59,8 +55,8 @@ class CasePublic(BaseModel):
     id: int
     case_id: int
     name: str
-
-
+    created_at: datetime
+    
     class Config:
         from_attributes = True
         str_strip_whitespace = True
@@ -84,9 +80,9 @@ def home():
     return {'name': 'JurisFlow API', 'status': 'healthy', 'model_version': '1.0'}
 
 @app.post('/cases')
-def create_case(case: createCase):
+def create_case(case: CaseCreate):
     # Logic to create a new case
-    pass
+    pass 
 
 @app.get('/cases/{case_id}')
 def get_case(case_id: int):
