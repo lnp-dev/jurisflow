@@ -20,7 +20,8 @@ except ImportError:
     gliner_model = None
 
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
-from presidio_anonymizer import AnonymizerEngine, AnonymizerConfig
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
 
 analyzer = AnalyzerEngine()
 anonymizer = AnonymizerEngine()
@@ -146,7 +147,7 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
             # We need custom operators to replace with our token
             operators = {}
             for rd in redaction_dicts:
-                operators[rd.entity_type] = AnonymizerConfig("replace", {"new_value": rd.redacted_token})
+                operators[rd.entity_type] = OperatorConfig("replace", {"new_value": rd.redacted_token})
                 
             # Re-Analyze to make sure new dynamic models take effect
             results = analyzer.analyze(text=chunk.raw_text, language='en')

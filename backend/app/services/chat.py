@@ -14,7 +14,8 @@ except ImportError:
     genai = None
 
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
-from presidio_anonymizer import AnonymizerEngine, AnonymizerConfig
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
 
 analyzer = AnalyzerEngine()
 anonymizer = AnonymizerEngine()
@@ -32,7 +33,7 @@ def scrub_prompt(session: Session, case_id: UUID, prompt: str) -> str:
         pattern = Pattern(name=rd.redacted_token, regex=re.escape(rd.original_text), score=1.0)
         recognizer = PatternRecognizer(supported_entity=rd.entity_type, patterns=[pattern])
         registry.add_recognizer(recognizer)
-        operators[rd.entity_type] = AnonymizerConfig("replace", {"new_value": rd.redacted_token})
+        operators[rd.entity_type] = OperatorConfig("replace", {"new_value": rd.redacted_token})
         
     results = analyzer.analyze(text=prompt, language='en')
     anonymized = anonymizer.anonymize(
