@@ -137,7 +137,7 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
     # Find CHUNK_IDs that were linked to entities mentioned in the answer
     for chunk_id, entities in chunk_map.items():
         for ent_desc in entities:
-             if any(token in raw_answer for token in re.findall(r'\[[A-Z0-9]_+\]', ent_desc)):
+             if any(token in raw_answer for token in re.findall(r'\[[A-Z0-9_]+\]', ent_desc)):
                  found_chunk_ids.add(chunk_id)
                  break
     
