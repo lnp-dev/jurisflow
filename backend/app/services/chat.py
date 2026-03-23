@@ -1,0 +1,139 @@
+import re
+from uuid import UUID
+from sqlmodel import Session, select
+from typing import List, Dict, Any
+
+from app.models.domain import RedactionDictionary, DocumentChunk
+from app.core.config import settings
+from app.core.graph import get_neo4j_session
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+
+from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
+from presidio_anonymizer import AnonymizerEngine, AnonymizerConfig
+
+analyzer = AnalyzerEngine()
+anonymizer = AnonymizerEngine()
+
+client = genai.Client(api_key=settings.GEMINI_API_KEY) if genai and settings.GEMINI_API_KEY else None
+
+def scrub_prompt(session: Session, case_id: UUID, prompt: str) -> str:
+    dict_stmt = select(RedactionDictionary).where(RedactionDictionary.case_id == case_id)
+    redaction_dicts = session.exec(dict_stmt).all()
+    
+    registry = analyzer.registry
+    operators = {}
+    
+    for rd in redaction_dicts:
+        pattern = Pattern(name=rd.redacted_token, regex=re.escape(rd.original_text), score=1.0)
+        recognizer = PatternRecognizer(supported_entity=rd.entity_type, patterns=[pattern])
+        registry.add_recognizer(recognizer)
+        operators[rd.entity_type] = AnonymizerConfig("replace", {"new_value": rd.redacted_token})
+        
+    results = analyzer.analyze(text=prompt, language='en')
+    anonymized = anonymizer.anonymize(
+        text=prompt,
+        analyzer_results=results,
+        operators=operators
+    )
+    
+    return anonymized.text
+
+def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
+    if not client:
+        return {"answer": "Gemini API not configured", "citations": []}
+        
+    # 1. Graph Retrieval
+    neo4j_session_gen = get_neo4j_session()
+    neo_session = next(neo4j_session_gen)
+    
+    graph_context = []
+    try:
+        # Fetch nodes/edges and their source_chunk_ids
+        query = (
+            "MATCH (n {case_id: $case_id})-[r]->(m {case_id: $case_id}) "
+            "RETURN labels(n)[0] as n_label, n.id as n_id, n.source_chunk_ids as n_sources, "
+            "type(r) as r_type, labels(m)[0] as m_label, m.id as m_id, m.source_chunk_ids as m_sources "
+            "LIMIT 50"
+        )
+        result = neo_session.run(query, case_id=str(case_id))
+        
+        chunk_map = {} # To keep track of which chunk explains which part
+        for record in result:
+            desc = f"({record['n_label']} {record['n_id']}) -[{record['r_type']}]-> ({record['m_label']} {record['m_id']})"
+            graph_context.append(desc)
+            
+            # Map chunk IDs to entities mentioned
+            all_sources = (record['n_sources'] or []) + (record['m_sources'] or [])
+            for src in all_sources:
+                if src not in chunk_map:
+                    chunk_map[src] = []
+                chunk_map[src].append(desc)
+    finally:
+        neo_session.close()
+        
+    context_str = "\n".join(graph_context)
+    
+    # 2. LLM Call
+    system_instruction = (
+        "You are an expert M&A legal assistant. You are given a user question and a knowledge graph context. "
+        "The context contains redacted entities like [ORG_1] or [PERSON_2]. "
+        "Use ONLY the provided context to answer the question. Preserve the exact redacted tokens in your answer. "
+        "IMPORTANT: When you use information from the graph, you MUST cite the entities involved. "
+        "If the context does not contain the answer, state that you do not have enough information."
+    )
+    
+    user_prompt = f"Knowledge Graph Context:\n{context_str}\n\nQuestion:\n{redacted_prompt}"
+    
+    response = client.models.generate_content(
+        model='gemini-3.1-pro',
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.1
+        )
+    )
+    
+    raw_answer = response.text
+    
+    # 3. Inbound Rehydration
+    dict_stmt = select(RedactionDictionary).where(RedactionDictionary.case_id == case_id)
+    redaction_dicts = session.exec(dict_stmt).all()
+    
+    rehydrated_answer = raw_answer
+    for rd in redaction_dicts:
+        rehydrated_answer = rehydrated_answer.replace(rd.redacted_token, rd.original_text)
+        
+    # 4. Citations: Fetch Chunk metadata from Postgres
+    citations = []
+    found_chunk_ids = set()
+    # Find CHUNK_IDs that were linked to entities mentioned in the answer
+    for chunk_id, entities in chunk_map.items():
+        # This is a bit naive - if any entity from that chunk is in the answer, we cite it
+        for ent_desc in entities:
+             # Basic check if those entity IDs appear in the answer (redacted or rehydrated)
+             # This could be improved with better LLM citation output
+             if any(token in raw_answer for token in re.findall(r'\[\w+_\d+\]', ent_desc)):
+                 found_chunk_ids.add(chunk_id)
+                 break
+    
+    if found_chunk_ids:
+        chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(list(found_chunk_ids)))
+        results = session.exec(chunk_stmt).all()
+        for res in results:
+            citations.append({
+                "chunk_id": str(res.id),
+                "document_id": str(res.document_id),
+                "page": res.page_number,
+                "bbox": res.bounding_box,
+                "text": res.redacted_text # Or rehydrated if needed
+            })
+    
+    return {
+        "answer": rehydrated_answer,
+        "citations": citations
+    }

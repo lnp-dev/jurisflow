@@ -1,0 +1,14 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlmodel>=0.0.22
+psycopg2-binary>=2.9.9
+asyncpg>=0.29.0
+neo4j>=5.25.0
+docling>=2.0.0
+gliner>=1.0.0
+presidio-analyzer>=3.0.0
+presidio-anonymizer>=3.0.0
+google-genai>=2.4.0
+pydantic>=2.10.0
+pydantic-settings>=2.5.0
+python-multipart>=0.0.12
