@@ -47,43 +47,66 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
     if not client:
         return {"answer": "Gemini API not configured", "citations": []}
         
-    # 1. Graph Retrieval
+    # 1. Graph Retrieval (Targeted)
     neo4j_session_gen = get_neo4j_session()
     neo_session = next(neo4j_session_gen)
     
     graph_context = []
+    chunk_map = {} # To keep track of which chunk explains which part
+    
+    # Extract entities from the prompt
+    extracted_tokens = re.findall(r'\[[A-Z0-9_]+\]', redacted_prompt)
+    
     try:
-        # Fetch nodes/edges and their source_chunk_ids
-        query = (
-            "MATCH (n {case_id: $case_id})-[r]->(m {case_id: $case_id}) "
-            "RETURN labels(n)[0] as n_label, n.id as n_id, n.source_chunk_ids as n_sources, "
-            "type(r) as r_type, labels(m)[0] as m_label, m.id as m_id, m.source_chunk_ids as m_sources "
-            "LIMIT 50"
-        )
-        result = neo_session.run(query, case_id=str(case_id))
-        
-        chunk_map = {} # To keep track of which chunk explains which part
-        for record in result:
-            desc = f"({record['n_label']} {record['n_id']}) -[{record['r_type']}]-> ({record['m_label']} {record['m_id']})"
-            graph_context.append(desc)
+        if extracted_tokens:
+            # Query relationships containing these specific entities
+            query = (
+                "MATCH (n {case_id: $case_id})-[r]-(m {case_id: $case_id}) "
+                "WHERE n.id IN $entities OR m.id IN $entities "
+                "RETURN labels(n)[0] as n_label, n.id as n_id, n.source_chunk_ids as n_sources, "
+                "type(r) as r_type, labels(m)[0] as m_label, m.id as m_id, m.source_chunk_ids as m_sources "
+                "LIMIT 100"
+            )
+            result = neo_session.run(query, case_id=str(case_id), entities=extracted_tokens)
             
-            # Map chunk IDs to entities mentioned
-            all_sources = (record['n_sources'] or []) + (record['m_sources'] or [])
-            for src in all_sources:
-                if src not in chunk_map:
-                    chunk_map[src] = []
-                chunk_map[src].append(desc)
+            for record in result:
+                desc = f"({record['n_label']} {record['n_id']}) -[{record['r_type']}]-> ({record['m_label']} {record['m_id']})"
+                graph_context.append(desc)
+                
+                # Map chunk IDs to entities mentioned
+                all_sources = (record['n_sources'] or []) + (record['m_sources'] or [])
+                for src in all_sources:
+                    if src not in chunk_map:
+                        chunk_map[src] = []
+                    chunk_map[src].append(desc)
     finally:
         neo_session.close()
         
-    context_str = "\n".join(graph_context)
+    # 2. Narrative Retrieval (Fetch actual text chunks linked to those graph nodes)
+    text_context = []
+    if chunk_map:
+        chunk_ids = list(chunk_map.keys())
+        # Fetch actual text for those specific chunks
+        try:
+            uuids = [UUID(cid) for cid in chunk_ids]
+            chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(uuids))
+            related_chunks = session.exec(chunk_stmt).all()
+            for chunk in related_chunks:
+                text_context.append(f"[NARRATIVE CHUNK {chunk.id}]: {chunk.redacted_text}")
+        except Exception as e:
+            print(f"Error fetching text context: {e}")
+            
+    context_str = "KNOWLEDGE GRAPH CONNECTIONS:\n" + "\n".join(graph_context)
+    if text_context:
+        context_str += "\n\nNARRATIVE TEXT CONTEXT:\n" + "\n".join(text_context[:10]) # Top 10 chunks to avoid overflow
     
-    # 2. LLM Call
+    # 3. LLM Call
     system_instruction = (
-        "You are an expert M&A legal assistant. You are given a user question and a knowledge graph context. "
+        "You are an expert M&A legal assistant. You are given a user question and a Hybrid RAG context. "
+        "The context contains both Knowledge Graph connections and Narrative Text snippets extracted from the original documents matching the graph edges. "
         "The context contains redacted entities like [ORG_1] or [PERSON_2]. "
         "Use ONLY the provided context to answer the question. Preserve the exact redacted tokens in your answer. "
-        "IMPORTANT: When you use information from the graph, you MUST cite the entities involved. "
+        "IMPORTANT: When you use information from a narrative chunk, you MUST cite the [NARRATIVE CHUNK ID]. "
         "If the context does not contain the answer, state that you do not have enough information."
     )
     
@@ -113,11 +136,8 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
     found_chunk_ids = set()
     # Find CHUNK_IDs that were linked to entities mentioned in the answer
     for chunk_id, entities in chunk_map.items():
-        # This is a bit naive - if any entity from that chunk is in the answer, we cite it
         for ent_desc in entities:
-             # Basic check if those entity IDs appear in the answer (redacted or rehydrated)
-             # This could be improved with better LLM citation output
-             if any(token in raw_answer for token in re.findall(r'\[\w+_\d+\]', ent_desc)):
+             if any(token in raw_answer for token in re.findall(r'\[[A-Z0-9]_+\]', ent_desc)):
                  found_chunk_ids.add(chunk_id)
                  break
     
@@ -126,11 +146,28 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
         results = session.exec(chunk_stmt).all()
         for res in results:
             citations.append({
+                "source": "graph",
                 "chunk_id": str(res.id),
                 "document_id": str(res.document_id),
                 "page": res.page_number,
                 "bbox": res.bounding_box,
-                "text": res.redacted_text # Or rehydrated if needed
+                "text": res.redacted_text
+            })
+            
+    # Also add direct narrative citations from the text
+    for chunk_id in re.findall(r'NARRATIVE CHUNK (\w+-\w+-\w+-\w+-\w+)', raw_answer):
+        # Prevent duplicates
+        if any(c["chunk_id"] == chunk_id for c in citations):
+            continue
+        res = session.get(DocumentChunk, UUID(chunk_id))
+        if res:
+            citations.append({
+                "source": "narrative",
+                "chunk_id": str(res.id),
+                "document_id": str(res.document_id),
+                "page": res.page_number,
+                "bbox": res.bounding_box,
+                "text": res.redacted_text
             })
     
     return {

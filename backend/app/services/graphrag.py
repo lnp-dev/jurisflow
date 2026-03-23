@@ -45,76 +45,90 @@ def build_graph_for_case(session: Session, case_id: UUID):
     if not chunks:
         return {"status": "no_chunks_found"}
         
-    combined_text = ""
-    for c in chunks:
-        if c.redacted_text:
-            combined_text += f"[CHUNK_ID: {c.id}]\n{c.redacted_text}\n\n"
-    
     if not client:
         print("Gemini API not configured")
         return {"status": "gemini_unavailable"}
         
-    # 2. LLM Call (Gemini API)
-    prompt = f"""
-    You are an expert legal M&A knowledge graph extractor.
-    Analyze the following fully redacted document text and extract a knowledge graph.
-    The nodes can only have the following labels: Company, Agreement, Clause, Asset, Person, Jurisdiction.
-    The edges should represent relationships like ACQUIRES, GOVERNS, CONTAINS_CLAUSE, OWNS_ASSET.
-    
-    Extract the entities and relationships exactly as they appear in the text, preserving any redacted tokens (e.g. [ORG_1]).
-    For every Node and Edge you extract, you MUST include the CHUNK_ID(s) it was derived from in the `source_chunk_ids` list.
-    
-    Text:
-    {combined_text[:30000]} # Truncating for safety in example
-    """
-    
-    response = client.models.generate_content(
-        model='gemini-3.1-pro',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=GraphData,
-            temperature=0.1
-        ),
-    )
-    
-    try:
-        graph_data: GraphData = GraphData.model_validate_json(response.text)
-    except Exception as e:
-        print(f"Error parsing Gemini response: {e}")
-        return {"status": "parsing_error"}
-        
-    # 3. Graph Injection
     neo4j_session_gen = get_neo4j_session()
     neo_session = next(neo4j_session_gen)
     
+    batch_size = 20
+    total_nodes = 0
+    total_edges = 0
+    
     try:
-        # Create Nodes
-        for node in graph_data.nodes:
-            # Note: Cypher injection should be handled carefully, here we use parameters
-            query = (
-                f"MERGE (n:{node.label} {{id: $id, case_id: $case_id}}) "
-                "SET n += $props, n.source_chunk_ids = $sources"
-            )
-            neo_session.run(query, id=node.id, case_id=str(case_id), props=node.properties, sources=node.source_chunk_ids)
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i+batch_size]
+            combined_text = ""
+            for c in batch:
+                if c.redacted_text:
+                    combined_text += f"[CHUNK_ID: {c.id}]\n{c.redacted_text}\n\n"
             
-        # Create Edges
-        for edge in graph_data.edges:
-            query = (
-                f"MATCH (source {{id: $source_id, case_id: $case_id}}) "
-                f"MATCH (target {{id: $target_id, case_id: $case_id}}) "
-                f"MERGE (source)-[r:{edge.type}]->(target) "
-                "SET r += $props, r.source_chunk_ids = $sources"
-            )
-            neo_session.run(
-                query, 
-                source_id=edge.source_id, 
-                target_id=edge.target_id, 
-                case_id=str(case_id),
-                props=edge.properties,
-                sources=edge.source_chunk_ids
+            prompt = f"""
+            You are an expert legal M&A knowledge graph extractor.
+            Analyze the following fully redacted document text and extract a knowledge graph.
+            The nodes can only have the following labels: Company, Agreement, Clause, Asset, Person, Jurisdiction.
+            The edges should represent relationships like ACQUIRES, GOVERNS, CONTAINS_CLAUSE, OWNS_ASSET.
+            
+            Extract the entities and relationships exactly as they appear in the text, preserving any redacted tokens (e.g. [ORG_1]).
+            For every Node and Edge you extract, you MUST include the CHUNK_ID(s) it was derived from in the `source_chunk_ids` list.
+            
+            Text:
+            {combined_text}
+            """
+            
+            response = client.models.generate_content(
+                model='gemini-3.1-pro',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=GraphData,
+                    temperature=0.1
+                ),
             )
             
+            try:
+                graph_data: GraphData = GraphData.model_validate_json(response.text)
+            except Exception as e:
+                print(f"Error parsing Gemini response: {e}")
+                continue
+                
+            total_nodes += len(graph_data.nodes)
+            total_edges += len(graph_data.edges)
+            
+            # Create Nodes
+            for node in graph_data.nodes:
+                query = (
+                    f"MERGE (n:{node.label} {{id: $id, case_id: $case_id}}) "
+                    "SET n += $props "
+                    "WITH n "
+                    "UNWIND (coalesce(n.source_chunk_ids, []) + $sources) AS all_sources "
+                    "WITH n, collect(DISTINCT all_sources) AS unique_sources "
+                    "SET n.source_chunk_ids = unique_sources"
+                )
+                neo_session.run(query, id=node.id, case_id=str(case_id), props=node.properties, sources=node.source_chunk_ids)
+                
+            # Create Edges
+            for edge in graph_data.edges:
+                query = (
+                    f"MATCH (source {{id: $source_id, case_id: $case_id}}) "
+                    f"MATCH (target {{id: $target_id, case_id: $case_id}}) "
+                    f"MERGE (source)-[r:{edge.type}]->(target) "
+                    "SET r += $props "
+                    "WITH r "
+                    "UNWIND (coalesce(r.source_chunk_ids, []) + $sources) AS all_sources "
+                    "WITH r, collect(DISTINCT all_sources) AS unique_sources "
+                    "SET r.source_chunk_ids = unique_sources"
+                )
+                neo_session.run(
+                    query, 
+                    source_id=edge.source_id, 
+                    target_id=edge.target_id, 
+                    case_id=str(case_id),
+                    props=edge.properties,
+                    sources=edge.source_chunk_ids
+                )
+                
         # Update Document status
         doc_stmt = select(Document).where(Document.case_id == case_id)
         docs = session.exec(doc_stmt).all()
@@ -126,4 +140,4 @@ def build_graph_for_case(session: Session, case_id: UUID):
     finally:
         neo_session.close()
         
-    return {"status": "graph_built", "nodes": len(graph_data.nodes), "edges": len(graph_data.edges)}
+    return {"status": "graph_built", "nodes": total_nodes, "edges": total_edges}
