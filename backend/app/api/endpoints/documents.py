@@ -15,7 +15,7 @@ def session_factory():
 router = APIRouter()
 
 @router.post("/cases/{case_id}/documents")
-async def upload_document(
+def upload_document(
     case_id: UUID, 
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -53,7 +53,7 @@ async def upload_document(
     return {"status": "received", "document_id": doc.id, "message": "Processing in background"}
 
 @router.post("/cases/{case_id}/build-graph")
-async def build_graph(
+def build_graph(
     case_id: UUID,
     session: Session = Depends(get_session)
 ):

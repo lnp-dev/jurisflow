@@ -13,7 +13,7 @@ class PromptRequest(BaseModel):
     prompt: str
 
 @router.post("/scrub-prompt")
-async def scrub_prompt(
+def scrub_prompt(
     request: PromptRequest,
     session: Session = Depends(get_session)
 ):
@@ -21,7 +21,7 @@ async def scrub_prompt(
     return {"redacted_prompt": redacted}
 
 @router.post("/ask")
-async def ask_question(
+def ask_question(
     request: PromptRequest,
     session: Session = Depends(get_session)
 ):
