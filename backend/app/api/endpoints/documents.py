@@ -42,7 +42,6 @@ async def upload_document(
     session.add(doc)
     session.commit()
     
-    # For a real app, consider running this in a background task
     try:
         process_document(session, doc)
     except Exception as e:
