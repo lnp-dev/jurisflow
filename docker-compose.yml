@@ -9,7 +9,7 @@ services:
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
   neo4j:
-    image: neo4j:5.25.0
+    image: neo4j:latest
     ports:
       - "7474:7474"
       - "7687:7687"
