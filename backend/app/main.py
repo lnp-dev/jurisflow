@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import documents, chat
+from app.api.endpoints import documents, chat, cases
 from app.core.database import engine
 from app.models.domain import SQLModel
 
@@ -18,6 +18,7 @@ app.add_middleware(
 def on_startup():
     SQLModel.metadata.create_all(engine)
 
+app.include_router(cases.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(chat.router, prefix="/api/chat")
 

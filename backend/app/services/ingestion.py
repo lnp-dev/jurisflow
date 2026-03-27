@@ -66,6 +66,14 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
         # 2. Local Sweep with GLiNER
         labels = ["Person", "Company", "Organization", "Location", "Codename", "Project"]
         
+        # Stopwords: Common legal/generic terms that GLiNER often misidentifies as entities
+        STOPWORDS = {
+            "law", "order", "lien", "parent", "company", "corporation", "inc", "llc", 
+            "purchaser", "seller", "buyer", "target", "merger", "agreement", "party",
+            "parties", "contract", "state", "federal", "court", "judge", "treasurer",
+            "business day", "closing date", "termination date", "effective time"
+        }
+        
         # We need to find all entities across all chunks to build the dictionary
         case_id = document.case_id
         
@@ -74,8 +82,16 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
             
             # 3. Dictionary Generation
             for ent in entities:
-                orig_text = ent["text"]
+                orig_text = ent["text"].strip()
                 ent_type = ent["label"].upper()
+                
+                # Filter 1: Ignore Stopwords
+                if orig_text.lower() in STOPWORDS:
+                    continue
+                    
+                # Filter 2: Ignore very short tokens (e.g. "A", "I") or purely numeric/symbol strings
+                if len(orig_text) <= 2 or not any(c.isalpha() for c in orig_text):
+                    continue
                 
                 # Check if exists
                 stmt = select(RedactionDictionary).where(
@@ -116,15 +132,21 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
             registry.add_recognizer(recognizer)
             
         for chunk in saved_chunks:
-            # Analyze
-            results = analyzer.analyze(text=chunk.raw_text, language='en')
+            # Analyze - Increased confidence threshold to avoid false positives (e.g., zip codes as SSNs)
+            # Default is 0.0, we want to be much stricter about what we consider PII
+            results = analyzer.analyze(text=chunk.raw_text, language='en', score_threshold=0.8)
             
             # Save standard PII not yet in the dictionary
             dict_entities = {rd.entity_type for rd in redaction_dicts}
             dict_texts = {rd.original_text for rd in redaction_dicts}
             
             for res in results:
-                orig_text = chunk.raw_text[res.start:res.end]
+                orig_text = chunk.raw_text[res.start:res.end].strip()
+                
+                # Double check length and stopwords even for Presidio
+                if len(orig_text) <= 2 or orig_text.lower() in STOPWORDS:
+                    continue
+                    
                 if orig_text not in dict_texts:
                     token = f"[{res.entity_type}_{uuid4().hex[:6].upper()}]"
                     new_rd = RedactionDictionary(
@@ -165,7 +187,19 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
         session.commit()
     
     except Exception as e:
-        print(f"Error in background ingestion: {e}")
+        import traceback
+        error_detailed = traceback.format_exc()
+        print(f"Error in background ingestion: {e}\n{error_detailed}")
+        try:
+            # Re-fetch document to ensure we have a clean state for error recording
+            document = session.get(Document, document_id)
+            if document:
+                document.status = "failed"
+                document.error_message = str(e)
+                session.add(document)
+                session.commit()
+        except Exception as db_e:
+            print(f"Critical: Failed to record error status in DB: {db_e}")
         session.rollback()
     finally:
         session.close()

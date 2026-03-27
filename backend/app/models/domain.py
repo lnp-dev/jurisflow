@@ -1,7 +1,7 @@
 from typing import Optional, Any
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlmodel import Field, SQLModel, JSON
+from sqlmodel import Field, SQLModel, JSON, Relationship
 from sqlalchemy import Column
 from pydantic import BaseModel
 
@@ -10,6 +10,8 @@ class Case(SQLModel, table=True):
     name: str = Field(index=True)
     domain: str = Field(default="M&A")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    documents: list["Document"] = Relationship(back_populates="case")
 
 class Document(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -17,6 +19,9 @@ class Document(SQLModel, table=True):
     filename: str
     file_path: str
     status: str = Field(default="uploaded")  # uploaded, parsed, redacted, graph_built
+    error_message: Optional[str] = None
+
+    case: Optional["Case"] = Relationship(back_populates="documents")
 
 class DocumentChunk(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)

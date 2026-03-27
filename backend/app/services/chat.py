@@ -175,3 +175,144 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
         "answer": rehydrated_answer,
         "citations": citations
     }
+
+def ask_question_stream(session: Session, case_id: UUID, redacted_prompt: str):
+    if not client:
+        yield "data: {\"type\": \"error\", \"content\": \"Gemini API not configured\"}\n\n"
+        return
+
+    # 1. Graph & Narrative Retrieval (Same as non-streaming for context building)
+    neo4j_session_gen = get_neo4j_session()
+    neo_session = next(neo4j_session_gen)
+    graph_context = []
+    chunk_map = {}
+    extracted_tokens = re.findall(r'\[[A-Z0-9_]+\]', redacted_prompt)
+    
+    try:
+        if extracted_tokens:
+            query = (
+                "MATCH (n {case_id: $case_id})-[r]-(m {case_id: $case_id}) "
+                "WHERE n.id IN $entities OR m.id IN $entities "
+                "RETURN labels(n)[0] as n_label, n.id as n_id, n.source_chunk_ids as n_sources, "
+                "type(r) as r_type, labels(m)[0] as m_label, m.id as m_id, m.source_chunk_ids as m_sources "
+                "LIMIT 100"
+            )
+            result = neo_session.run(query, case_id=str(case_id), entities=extracted_tokens)
+            for record in result:
+                desc = f"({record['n_label']} {record['n_id']}) -[{record['r_type']}]-> ({record['m_label']} {record['m_id']})"
+                graph_context.append(desc)
+                all_sources = (record['n_sources'] or []) + (record['m_sources'] or [])
+                for src in all_sources:
+                    if src not in chunk_map: chunk_map[src] = []
+                    chunk_map[src].append(desc)
+    finally:
+        neo_session.close()
+
+    text_context = []
+    if chunk_map:
+        uuids = [UUID(cid) for cid in chunk_map.keys()]
+        chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(uuids))
+        related_chunks = session.exec(chunk_stmt).all()
+        for chunk in related_chunks:
+            text_context.append(f"[NARRATIVE CHUNK {chunk.id}]: {chunk.redacted_text}")
+
+    context_str = "KNOWLEDGE GRAPH CONNECTIONS:\n" + "\n".join(graph_context)
+    if text_context:
+        context_str += "\n\nNARRATIVE TEXT CONTEXT:\n" + "\n".join(text_context[:10])
+
+    system_instruction = (
+        "You are an expert M&A legal assistant. Use ONLY the provided context to answer the question. "
+        "Preserve the exact redacted tokens (e.g. [ORG_1]) in your answer. "
+        "Cite [NARRATIVE CHUNK ID] when appropriate."
+    )
+    user_prompt = f"Context:\n{context_str}\n\nQuestion:\n{redacted_prompt}"
+
+    # Load dictionary for rehydration
+    dict_stmt = select(RedactionDictionary).where(RedactionDictionary.case_id == case_id)
+    redaction_dicts = {rd.redacted_token: rd.original_text for rd in session.exec(dict_stmt).all()}
+
+    # 3. LLM Call (Streaming)
+    response_stream = client.models.generate_content_stream(
+        model='gemini-2.0-flash', # Using flash for faster streaming
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.1
+        )
+    )
+
+    full_answer_raw = ""
+    buffer = ""
+    
+    import json
+
+    for chunk in response_stream:
+        text_chunk = chunk.text
+        full_answer_raw += text_chunk
+        buffer += text_chunk
+        
+        # 1. Substitute any whole tokens we find in the current buffer
+        for token, real_val in redaction_dicts.items():
+            if token in buffer:
+                buffer = buffer.replace(token, real_val)
+        
+        # 2. Check for partial tokens. 
+        # If there is a '[', we only yield everything BEFORE it to avoid "leaking" a redacted token.
+        if "[" in buffer:
+            last_bracket_idx = buffer.rfind("[")
+            # Safety: If the buffer after '[' is too long, it's likely not a token, so yield it.
+            if len(buffer) - last_bracket_idx > 32:
+                yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+                buffer = ""
+            else:
+                safe_to_yield = buffer[:last_bracket_idx]
+                if safe_to_yield:
+                    yield f"data: {json.dumps({'type': 'content', 'delta': safe_to_yield})}\n\n"
+                buffer = buffer[last_bracket_idx:]
+        else:
+            # No bracket, safe to yield all
+            if buffer:
+                yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+                buffer = ""
+
+    # Yield remaining buffer
+    if buffer:
+        for token, real_val in redaction_dicts.items():
+            buffer = buffer.replace(token, real_val)
+        yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+
+    # 4. Citations (Send at the end)
+    citations = []
+    found_chunk_ids = set()
+    for chunk_id, entities in chunk_map.items():
+        for ent_desc in entities:
+             if any(token in full_answer_raw for token in re.findall(r'\[[A-Z0-9_]+\]', ent_desc)):
+                  found_chunk_ids.add(chunk_id)
+                  break
+    
+    if found_chunk_ids:
+        chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(list(found_chunk_ids)))
+        results = session.exec(chunk_stmt).all()
+        for res in results:
+            citations.append({
+                "source": "graph",
+                "chunk_id": str(res.id),
+                "document_id": str(res.document_id),
+                "page": res.page_number,
+                "text": res.redacted_text
+            })
+            
+    for chunk_id in re.findall(r'NARRATIVE CHUNK (\w+-\w+-\w+-\w+-\w+)', full_answer_raw):
+        if any(c["chunk_id"] == chunk_id for c in citations): continue
+        res = session.get(DocumentChunk, UUID(chunk_id))
+        if res:
+            citations.append({
+                "source": "narrative",
+                "chunk_id": str(res.id),
+                "document_id": str(res.document_id),
+                "page": res.page_number,
+                "text": res.redacted_text
+            })
+
+    yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+    yield "data: [DONE]\n\n"
