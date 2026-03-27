@@ -132,9 +132,9 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
             registry.add_recognizer(recognizer)
             
         for chunk in saved_chunks:
-            # Analyze - Increased confidence threshold to avoid false positives (e.g., zip codes as SSNs)
-            # Default is 0.0, we want to be much stricter about what we consider PII
-            results = analyzer.analyze(text=chunk.raw_text, language='en', score_threshold=0.8)
+            # Analyze - Lowered threshold back to 0.4 to ensure we don't miss real PII (False Negatives),
+            # but we will use custom logic below to filter out known False Positives (like zip codes).
+            results = analyzer.analyze(text=chunk.raw_text, language='en', score_threshold=0.4)
             
             # Save standard PII not yet in the dictionary
             dict_entities = {rd.entity_type for rd in redaction_dicts}
@@ -144,6 +144,21 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
                 orig_text = chunk.raw_text[res.start:res.end].strip()
                 
                 # Double check length and stopwords even for Presidio
+                if len(orig_text) <= 2 or orig_text.lower() in STOPWORDS:
+                    continue
+                    
+                # Custom False-Positive Prevention:
+                # Presidio often tags zip codes (e.g., 94304-1050) as US_SSN.
+                # SSNs are exactly 9 digits (plus dashes: XXX-XX-XXXX).
+                if res.entity_type == "US_SSN":
+                    # If it's 5 digits, or 5 digits + dash + 4 digits, it's a zip code, not an SSN.
+                    digits_only = re.sub(r'\D', '', orig_text)
+                    if len(digits_only) != 9:
+                        continue
+                        
+                # Prevent pure numbers from being tagged as generic PERSON/ORG
+                if res.entity_type in ["PERSON", "ORGANIZATION"] and not any(c.isalpha() for c in orig_text):
+                    continue
                 if len(orig_text) <= 2 or orig_text.lower() in STOPWORDS:
                     continue
                     
