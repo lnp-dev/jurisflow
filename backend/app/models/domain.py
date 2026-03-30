@@ -30,6 +30,7 @@ class DocumentChunk(SQLModel, table=True):
     redacted_text: Optional[str] = None
     page_number: Optional[int] = None
     bounding_box: Optional[list[float]] = Field(default=None, sa_column=Column(JSON))
+    is_graph_processed: bool = Field(default=False)
 
 class RedactionDictionary(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)

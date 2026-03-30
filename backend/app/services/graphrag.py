@@ -3,6 +3,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import json
+import re
 
 from app.models.domain import DocumentChunk, Document
 from app.core.config import settings
@@ -32,19 +33,24 @@ class GraphData(BaseModel):
     nodes: List[Node]
     edges: List[Edge]
 
-client = genai.Client(api_key=settings.GEMINI_API_KEY) if genai and settings.GEMINI_API_KEY else None
+def get_gemini_client():
+    if not genai or not settings.GEMINI_API_KEY:
+        return None
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 def build_graph_for_case(session: Session, case_id: UUID):
     # 1. Fetch Data
     stmt = select(DocumentChunk).where(
         DocumentChunk.document_id == Document.id,
-        Document.case_id == case_id
+        Document.case_id == case_id,
+        DocumentChunk.is_graph_processed == False
     )
     chunks = session.exec(stmt).all()
     
     if not chunks:
         return {"status": "no_chunks_found"}
         
+    client = get_gemini_client()
     if not client:
         print("Gemini API not configured")
         return {"status": "gemini_unavailable"}
@@ -78,7 +84,7 @@ def build_graph_for_case(session: Session, case_id: UUID):
             """
             
             response = client.models.generate_content(
-                model='gemini-3.1-pro',
+                model='gemini-2.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -110,11 +116,16 @@ def build_graph_for_case(session: Session, case_id: UUID):
                 
             # Create Edges
             for edge in graph_data.edges:
+                # Sanitize edge type (no spaces, alphanumeric only for Neo4j labels)
+                safe_type = re.sub(r'[^a-zA-Z0-9_]', '_', edge.type).upper()
+                if not safe_type[0].isalpha(): safe_type = "REL_" + safe_type
+                
                 query = (
                     f"MATCH (source {{id: $source_id, case_id: $case_id}}) "
                     f"MATCH (target {{id: $target_id, case_id: $case_id}}) "
-                    f"MERGE (source)-[r:{edge.type}]->(target) "
+                    f"MERGE (source)-[r:{safe_type}]->(target) "
                     "SET r += $props "
+                    "SET r.case_id = $case_id "
                     "WITH r "
                     "UNWIND (coalesce(r.source_chunk_ids, []) + $sources) AS all_sources "
                     "WITH r, collect(DISTINCT all_sources) AS unique_sources "
@@ -128,6 +139,12 @@ def build_graph_for_case(session: Session, case_id: UUID):
                     props=edge.properties,
                     sources=edge.source_chunk_ids
                 )
+            
+            # Mark batch as processed
+            for c in batch:
+                c.is_graph_processed = True
+                session.add(c)
+            session.commit()
                 
         # Update Document status
         doc_stmt = select(Document).where(Document.case_id == case_id)
