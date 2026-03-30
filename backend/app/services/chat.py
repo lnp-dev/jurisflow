@@ -69,8 +69,20 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
                 "LIMIT 100"
             )
             result = neo_session.run(query, case_id=str(case_id), entities=extracted_tokens)
-            
-            for record in result:
+        else:
+            # Fallback: Query for top-level entities and structural markers (Articles/Sections)
+            query = (
+                "MATCH (n {case_id: $case_id})-[r]-(m {case_id: $case_id}) "
+                "WHERE labels(n)[0] IN ['Company', 'Agreement'] "
+                "   OR n.id =~ '(?i).*(Article|Section|Clause).*' "
+                "   OR m.id =~ '(?i).*(Article|Section|Clause).*' "
+                "RETURN labels(n)[0] as n_label, n.id as n_id, n.source_chunk_ids as n_sources, "
+                "type(r) as r_type, labels(m)[0] as m_label, m.id as m_id, m.source_chunk_ids as m_sources "
+                "LIMIT 50"
+            )
+            result = neo_session.run(query, case_id=str(case_id))
+        
+        for record in result:
                 desc = f"({record['n_label']} {record['n_id']}) -[{record['r_type']}]-> ({record['m_label']} {record['m_id']})"
                 graph_context.append(desc)
                 
@@ -114,7 +126,7 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
     user_prompt = f"Knowledge Graph Context:\n{context_str}\n\nQuestion:\n{redacted_prompt}"
     
     response = client.models.generate_content(
-        model='gemini-3.1-pro',
+        model='gemini-2.5-flash',
         contents=user_prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
@@ -129,8 +141,12 @@ def ask_question(session: Session, case_id: UUID, redacted_prompt: str) -> dict:
     redaction_dicts = session.exec(dict_stmt).all()
     
     rehydrated_answer = raw_answer
-    for rd in redaction_dicts:
-        rehydrated_answer = rehydrated_answer.replace(rd.redacted_token, rd.original_text)
+    # Sort dictionary by length of token descending to avoid partial matches
+    sorted_dicts = sorted(redaction_dicts, key=lambda x: len(x.redacted_token), reverse=True)
+    for rd in sorted_dicts:
+        # Use regex to replace ONLY exact token matches
+        pattern = re.escape(rd.redacted_token)
+        rehydrated_answer = re.sub(pattern, rd.original_text, rehydrated_answer)
         
     # 4. Citations: Fetch Chunk metadata from Postgres
     citations = []

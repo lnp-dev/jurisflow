@@ -66,12 +66,16 @@ def process_document(session_factory, case_id: UUID, document_id: UUID):
         # 2. Local Sweep with GLiNER
         labels = ["Person", "Company", "Organization", "Location", "Codename", "Project"]
         
-        # Stopwords: Common legal/generic terms that GLiNER often misidentifies as entities
+        # Stopwords: Common legal/generic terms that GLiNER/Presidio often misidentifies as entities
         STOPWORDS = {
             "law", "order", "lien", "parent", "company", "corporation", "inc", "llc", 
             "purchaser", "seller", "buyer", "target", "merger", "agreement", "party",
             "parties", "contract", "state", "federal", "court", "judge", "treasurer",
-            "business day", "closing date", "termination date", "effective time"
+            "business day", "closing date", "termination date", "effective time",
+            "article", "section", "clause", "schedule", "exhibit", "person", "guarantor",
+            "this agreement", "herein", "hereto", "thereof", "hereunder", "recitals",
+            "date", "time", "day", "month", "year", "provision", "provisions", "term", "terms",
+            "sec", "sec.", "section.", "article.", "plan", "merger plan", "covid-19"
         }
         
         # We need to find all entities across all chunks to build the dictionary
