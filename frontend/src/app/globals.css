@@ -1,0 +1,381 @@
+@import "tailwindcss";
+
+/* ============================================
+   JURISFLOW — "Matrix Glass" Design System
+   Green/Black Glassmorphism Theme
+   ============================================ */
+
+@theme {
+  /* Core Palette */
+  --color-matrix-black: #050505;
+  --color-matrix-dark: #0a0a0a;
+  --color-matrix-surface: #111111;
+  --color-matrix-card: #141414;
+  --color-matrix-border: #1a1a1a;
+  --color-matrix-muted: #2a2a2a;
+
+  /* Green Spectrum */
+  --color-glow-primary: #00ff88;
+  --color-glow-secondary: #00cc6a;
+  --color-glow-dim: #00994f;
+  --color-glow-subtle: #004d28;
+  --color-glow-bg: rgba(0, 255, 136, 0.03);
+  --color-glow-bg-hover: rgba(0, 255, 136, 0.06);
+  --color-glow-border: rgba(0, 255, 136, 0.12);
+  --color-glow-border-hover: rgba(0, 255, 136, 0.25);
+
+  /* Text */
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #999999;
+  --color-text-muted: #666666;
+  --color-text-glow: #00ff88;
+
+  /* Status */
+  --color-status-success: #00ff88;
+  --color-status-warning: #ffaa00;
+  --color-status-error: #ff4444;
+  --color-status-info: #00aaff;
+  --color-status-processing: #aa66ff;
+
+  /* Glass */
+  --color-glass-bg: rgba(20, 20, 20, 0.7);
+  --color-glass-bg-hover: rgba(20, 20, 20, 0.85);
+  --color-glass-border: rgba(0, 255, 136, 0.08);
+
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+
+html {
+  background-color: var(--color-matrix-black);
+  color: var(--color-text-primary);
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: linear-gradient(170deg, #050505 0%, #0a0f0a 50%, #050505 100%);
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(0, 255, 136, 0.2);
+  color: #00ff88;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 136, 0.15);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 136, 0.3);
+}
+
+/* ============================================
+   Glass Components
+   ============================================ */
+
+.glass-panel {
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 16px;
+}
+
+.glass-panel-hover:hover {
+  background: var(--color-glass-bg-hover);
+  border-color: var(--color-glow-border-hover);
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.05);
+}
+
+.glass-card {
+  background: rgba(20, 20, 20, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-glow-border);
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  border-color: var(--color-glow-border-hover);
+  box-shadow: 0 0 40px rgba(0, 255, 136, 0.06), inset 0 1px 0 rgba(0, 255, 136, 0.05);
+  transform: translateY(-2px);
+}
+
+.glass-input {
+  background: rgba(10, 10, 10, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-glow-border);
+  border-radius: 10px;
+  color: var(--color-text-primary);
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: var(--color-glow-border-hover);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.08);
+}
+
+.glass-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ============================================
+   Glow Effects
+   ============================================ */
+
+.glow-text {
+  color: var(--color-glow-primary);
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.4), 0 0 40px rgba(0, 255, 136, 0.1);
+}
+
+.glow-border {
+  border: 1px solid var(--color-glow-border);
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.04);
+}
+
+.glow-button {
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.12), rgba(0, 204, 106, 0.08));
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  color: var(--color-glow-primary);
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 500;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.glow-button:hover {
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 204, 106, 0.15));
+  border-color: rgba(0, 255, 136, 0.4);
+  box-shadow: 0 0 25px rgba(0, 255, 136, 0.12);
+  transform: translateY(-1px);
+}
+
+.glow-button:active {
+  transform: translateY(0px);
+}
+
+.glow-button-solid {
+  background: linear-gradient(135deg, #00ff88, #00cc6a);
+  border: none;
+  color: #050505;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.glow-button-solid:hover {
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+  transform: translateY(-1px);
+}
+
+.glow-button-danger {
+  background: linear-gradient(135deg, rgba(255, 68, 68, 0.12), rgba(255, 68, 68, 0.08));
+  border: 1px solid rgba(255, 68, 68, 0.2);
+  color: #ff4444;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 500;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.glow-button-danger:hover {
+  background: linear-gradient(135deg, rgba(255, 68, 68, 0.2), rgba(255, 68, 68, 0.15));
+  border-color: rgba(255, 68, 68, 0.4);
+  box-shadow: 0 0 25px rgba(255, 68, 68, 0.12);
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 255, 136, 0.02) 25%,
+    rgba(0, 255, 136, 0.06) 50%,
+    rgba(0, 255, 136, 0.02) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ============================================
+   Status Badges
+   ============================================ */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.status-uploaded {
+  background: rgba(0, 170, 255, 0.1);
+  color: #00aaff;
+  border: 1px solid rgba(0, 170, 255, 0.2);
+}
+
+.status-parsed, .status-redacted {
+  background: rgba(170, 102, 255, 0.1);
+  color: #aa66ff;
+  border: 1px solid rgba(170, 102, 255, 0.2);
+}
+
+.status-graph_built {
+  background: rgba(0, 255, 136, 0.1);
+  color: #00ff88;
+  border: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+.status-error {
+  background: rgba(255, 68, 68, 0.1);
+  color: #ff4444;
+  border: 1px solid rgba(255, 68, 68, 0.2);
+}
+
+/* ============================================
+   Chat Bubbles
+   ============================================ */
+
+.chat-bubble-user {
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(0, 204, 106, 0.05));
+  border: 1px solid rgba(0, 255, 136, 0.15);
+  border-radius: 16px 16px 4px 16px;
+}
+
+.chat-bubble-ai {
+  background: rgba(20, 20, 20, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px 16px 16px 4px;
+}
+
+/* ============================================
+   Markdown in Chat
+   ============================================ */
+
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
+  font-family: var(--font-heading);
+  color: var(--color-text-primary);
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.chat-markdown p {
+  margin-bottom: 0.75em;
+  line-height: 1.7;
+}
+
+.chat-markdown ul, .chat-markdown ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.chat-markdown li {
+  margin-bottom: 0.3em;
+}
+
+.chat-markdown code {
+  background: rgba(0, 255, 136, 0.06);
+  border: 1px solid rgba(0, 255, 136, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-glow-primary);
+}
+
+.chat-markdown pre {
+  background: rgba(5, 5, 5, 0.8);
+  border: 1px solid rgba(0, 255, 136, 0.08);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  margin-bottom: 0.75em;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.chat-markdown strong {
+  color: var(--color-glow-primary);
+  font-weight: 600;
+}
+
+.chat-markdown blockquote {
+  border-left: 2px solid var(--color-glow-dim);
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.75em;
+}
+
+/* ============================================
+   Dropzone
+   ============================================ */
+
+.dropzone-active {
+  border-color: var(--color-glow-primary) !important;
+  background: rgba(0, 255, 136, 0.04) !important;
+  box-shadow: 0 0 50px rgba(0, 255, 136, 0.1);
+}

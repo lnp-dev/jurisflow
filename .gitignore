@@ -12,6 +12,11 @@ ENV/
 env.bak/
 venv.bak/
 
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+
 # Project-specific
 uploads/
 postgres_data/

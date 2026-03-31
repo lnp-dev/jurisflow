@@ -261,74 +261,86 @@ def ask_question_stream(session: Session, case_id: UUID, redacted_prompt: str):
     buffer = ""
     
     import json
-
-    for chunk in response_stream:
-        text_chunk = chunk.text
-        full_answer_raw += text_chunk
-        buffer += text_chunk
-        
-        # 1. Substitute any whole tokens we find in the current buffer
-        for token, real_val in redaction_dicts.items():
-            if token in buffer:
-                buffer = buffer.replace(token, real_val)
-        
-        # 2. Check for partial tokens. 
-        # If there is a '[', we only yield everything BEFORE it to avoid "leaking" a redacted token.
-        if "[" in buffer:
-            last_bracket_idx = buffer.rfind("[")
-            # Safety: If the buffer after '[' is too long, it's likely not a token, so yield it.
-            if len(buffer) - last_bracket_idx > 32:
-                yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
-                buffer = ""
-            else:
-                safe_to_yield = buffer[:last_bracket_idx]
-                if safe_to_yield:
-                    yield f"data: {json.dumps({'type': 'content', 'delta': safe_to_yield})}\n\n"
-                buffer = buffer[last_bracket_idx:]
-        else:
-            # No bracket, safe to yield all
-            if buffer:
-                yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
-                buffer = ""
-
-    # Yield remaining buffer
-    if buffer:
-        for token, real_val in redaction_dicts.items():
-            buffer = buffer.replace(token, real_val)
-        yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
-
-    # 4. Citations (Send at the end)
-    citations = []
-    found_chunk_ids = set()
-    for chunk_id, entities in chunk_map.items():
-        for ent_desc in entities:
-             if any(token in full_answer_raw for token in re.findall(r'\[[A-Z0-9_]+\]', ent_desc)):
-                  found_chunk_ids.add(chunk_id)
-                  break
-    
-    if found_chunk_ids:
-        chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(list(found_chunk_ids)))
-        results = session.exec(chunk_stmt).all()
-        for res in results:
-            citations.append({
-                "source": "graph",
-                "chunk_id": str(res.id),
-                "document_id": str(res.document_id),
-                "page": res.page_number,
-                "text": res.redacted_text
-            })
+    try:
+        for chunk in response_stream:
+            # Safely extract text
+            text_chunk = ""
+            try:
+                text_chunk = chunk.text
+            except Exception:
+                # Handle cases where .text might fail (e.g. safety filters)
+                if hasattr(chunk, 'candidates') and chunk.candidates:
+                    parts = chunk.candidates[0].content.parts
+                    if parts:
+                        text_chunk = getattr(parts[0], 'text', '')
             
-    for chunk_id in re.findall(r'NARRATIVE CHUNK (\w+-\w+-\w+-\w+-\w+)', full_answer_raw):
-        if any(c["chunk_id"] == chunk_id for c in citations): continue
-        res = session.get(DocumentChunk, UUID(chunk_id))
-        if res:
-            citations.append({
-                "source": "narrative",
-                "chunk_id": str(res.id),
-                "document_id": str(res.document_id),
-                "page": res.page_number,
-                "text": res.redacted_text
-            })
+            if not text_chunk:
+                continue
 
-    yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
-    yield "data: [DONE]\n\n"
+            full_answer_raw += text_chunk
+            buffer += text_chunk
+            
+            # 1. Substitute any whole tokens we find in the current buffer
+            for token, real_val in redaction_dicts.items():
+                if token in buffer:
+                    buffer = buffer.replace(token, real_val)
+            
+            # 2. Check for partial tokens. 
+            if "[" in buffer:
+                last_bracket_idx = buffer.rfind("[")
+                if len(buffer) - last_bracket_idx > 32:
+                    yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+                    buffer = ""
+                else:
+                    safe_to_yield = buffer[:last_bracket_idx]
+                    if safe_to_yield:
+                        yield f"data: {json.dumps({'type': 'content', 'delta': safe_to_yield})}\n\n"
+                    buffer = buffer[last_bracket_idx:]
+            else:
+                if buffer:
+                    yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+                    buffer = ""
+
+        # Yield remaining buffer
+        if buffer:
+            for token, real_val in redaction_dicts.items():
+                buffer = buffer.replace(token, real_val)
+            yield f"data: {json.dumps({'type': 'content', 'delta': buffer})}\n\n"
+
+        # 4. Citations (Send at the end)
+        citations = []
+        found_chunk_ids = set()
+        for chunk_id, entities in chunk_map.items():
+            for ent_desc in entities:
+                 if any(token in full_answer_raw for token in re.findall(r'\[[A-Z0-9_]+\]', ent_desc)):
+                      found_chunk_ids.add(chunk_id)
+                      break
+        
+        if found_chunk_ids:
+            chunk_stmt = select(DocumentChunk).where(DocumentChunk.id.in_(list(found_chunk_ids)))
+            results = session.exec(chunk_stmt).all()
+            for res in results:
+                citations.append({
+                    "source": "graph",
+                    "chunk_id": str(res.id),
+                    "document_id": str(res.document_id),
+                    "page": res.page_number,
+                    "text": res.redacted_text
+                })
+                
+        for chunk_id in re.findall(r'NARRATIVE CHUNK (\w+-\w+-\w+-\w+-\w+)', full_answer_raw):
+            if any(c["chunk_id"] == chunk_id for c in citations): continue
+            res = session.get(DocumentChunk, UUID(chunk_id))
+            if res:
+                citations.append({
+                    "source": "narrative",
+                    "chunk_id": str(res.id),
+                    "document_id": str(res.document_id),
+                    "page": res.page_number,
+                    "text": res.redacted_text
+                })
+
+        yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
