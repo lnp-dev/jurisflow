@@ -1,4 +1,4 @@
-# JurisFlow
+# [IN PROGRESS] JurisFlow
 
 JurisFlow is an AI-powered legal document intelligence platform designed for M&A professionals and legal teams. It combines a Knowledge Graph, a document ingestion pipeline with automatic PII redaction, and a GraphRAG-augmented chat interface to enable precise, cited question-answering over sensitive legal documents.
 
